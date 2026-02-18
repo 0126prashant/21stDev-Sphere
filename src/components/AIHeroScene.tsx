@@ -2,7 +2,7 @@
 
 import React, { useRef, useMemo } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { Float, Stars } from "@react-three/drei";
+import { Float, Stars, Torus } from "@react-three/drei";
 import {
   EffectComposer,
   Bloom,
@@ -30,11 +30,12 @@ function AICoreSphere() {
   const groupRef = useRef<THREE.Group>(null!);
   const panelLightRef = useRef<THREE.PointLight>(null!);
   const innerGlowRef = useRef<THREE.Mesh>(null!);
+  const orbitRingRef = useRef<THREE.Group>(null!);
 
   /* ── Geometry ── */
   const icoGeo = useMemo(() => new THREE.IcosahedronGeometry(2.0, 1), []);
-  const smoothGeo = useMemo(() => new THREE.IcosahedronGeometry(1.92, 3), []);
-  const edgesGeo = useMemo(() => new THREE.EdgesGeometry(icoGeo, 1), [icoGeo]);
+  const smoothGeo = useMemo(() => new THREE.IcosahedronGeometry(1.85, 4), []); // Slightly smaller solid core
+  const edgesGeo = useMemo(() => new THREE.EdgesGeometry(icoGeo, 1.1), [icoGeo]); // Thicker edges if possible (simulated via line width or tubes, here standard edges)
 
   /* ── Edge colors: varied brightness for realism ── */
   useMemo(() => {
@@ -42,20 +43,24 @@ function AICoreSphere() {
     const count = edgesGeo.attributes.position.count;
     const colors = new Float32Array(count * 3);
     for (let i = 0; i < count; i++) {
-      const b = rand();
-      if (b > 0.75) {
-        colors[i * 3] = 0.15;
-        colors[i * 3 + 1] = 1.0;
-        colors[i * 3 + 2] = 0.85;
-      } else if (b > 0.4) {
-        colors[i * 3] = 0.05;
-        colors[i * 3 + 1] = 0.6 + b * 0.3;
-        colors[i * 3 + 2] = 0.5 + b * 0.2;
-      } else {
-        colors[i * 3] = 0.02;
-        colors[i * 3 + 1] = 0.25 + b * 0.2;
-        colors[i * 3 + 2] = 0.22 + b * 0.15;
-      }
+        const b = rand();
+        // Cyan/Teal Palette
+        if (b > 0.8) {
+            // Bright Cyan Highlihgts
+            colors[i * 3] = 0.4;
+            colors[i * 3 + 1] = 1.0;
+            colors[i * 3 + 2] = 1.0; 
+        } else if (b > 0.4) {
+             // Mid Teal
+            colors[i * 3] = 0.0;
+            colors[i * 3 + 1] = 0.8;
+            colors[i * 3 + 2] = 0.8;
+        } else {
+             // Dark Teal
+            colors[i * 3] = 0.0;
+            colors[i * 3 + 1] = 0.3;
+            colors[i * 3 + 2] = 0.3;
+        }
     }
     edgesGeo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
   }, [edgesGeo]);
@@ -64,9 +69,9 @@ function AICoreSphere() {
   const panelGeos = useMemo(() => {
     const pos = icoGeo.attributes.position;
     const totalFaces = pos.count / 3;
-    const rand = seededRandom(77);
+    const rand = seededRandom(123); // New seed
     const faceIndices = new Set<number>();
-    while (faceIndices.size < 3) {
+    while (faceIndices.size < 4) { // Increased to 4 panels
       faceIndices.add(Math.floor(rand() * totalFaces));
     }
     return Array.from(faceIndices).map((fi) => {
@@ -93,17 +98,17 @@ function AICoreSphere() {
     const rand = seededRandom(200);
     const pos = icoGeo.attributes.position;
     const objects: THREE.Line[] = [];
-    for (let i = 0; i < 10; i++) {
+    for (let i = 0; i < 15; i++) { // Increased count
       const idx = Math.floor(rand() * pos.count);
       const v = new THREE.Vector3().fromBufferAttribute(pos, idx);
       const dir = v.clone().normalize();
       const start = v.clone().multiplyScalar(0.95);
-      const end = v.clone().add(dir.multiplyScalar(3.0 + rand() * 4.0));
+      const end = v.clone().add(dir.multiplyScalar(4.0 + rand() * 5.0)); // Longer beams
       const geo = new THREE.BufferGeometry().setFromPoints([start, end]);
       const mat = new THREE.LineBasicMaterial({
-        color: new THREE.Color().setHSL(0.47 + rand() * 0.06, 0.9, 0.55),
+        color: new THREE.Color().setHSL(0.5 + rand() * 0.1, 0.9, 0.6), // Cyan/Blue
         transparent: true,
-        opacity: 0.35 + rand() * 0.3,
+        opacity: 0.1 + rand() * 0.4,
         blending: THREE.AdditiveBlending,
         depthWrite: false,
         toneMapped: false,
@@ -118,252 +123,188 @@ function AICoreSphere() {
     const t = state.clock.getElapsedTime();
 
     if (groupRef.current) {
-      groupRef.current.rotation.y = t * 0.06;
-      groupRef.current.rotation.x = Math.sin(t * 0.03) * 0.08;
-      groupRef.current.position.y = Math.sin(t * 0.35) * 0.12;
+      groupRef.current.rotation.y = t * 0.04; // Slower rotation
+      groupRef.current.rotation.x = Math.sin(t * 0.02) * 0.05;
+    }
+
+    if (orbitRingRef.current) {
+        orbitRingRef.current.rotation.z = t * 0.1;
+        orbitRingRef.current.rotation.x = Math.PI / 2 + Math.sin(t * 0.05) * 0.1;
     }
 
     if (panelLightRef.current) {
-      panelLightRef.current.intensity = 4.0 + Math.sin(t * 1.2) * 1.5;
+       // Flicker effect
+      panelLightRef.current.intensity = 15.0 + Math.sin(t * 10.0) * 2.0 + Math.random() * 2.0;
     }
 
     if (innerGlowRef.current) {
       const mat = innerGlowRef.current.material as THREE.MeshBasicMaterial;
-      mat.opacity = 0.06 + Math.sin(t * 0.8) * 0.02;
+      mat.opacity = 0.05 + Math.sin(t * 0.5) * 0.03;
     }
 
     beamObjects.forEach((line, i) => {
       const mat = line.material as THREE.LineBasicMaterial;
-      mat.opacity = 0.2 + Math.sin(t * 1.8 + i * 1.1) * 0.2;
+      mat.opacity = 0.1 + Math.sin(t * 2.0 + i * 10.0) * 0.1 + Math.random() * 0.05;
     });
   });
 
   return (
-    <Float speed={0.5} rotationIntensity={0.08} floatIntensity={0.25}>
-      <group ref={groupRef} position={[1.6, 0, 0]}>
+    <Float speed={1.5} rotationIntensity={0.1} floatIntensity={0.4}>
+      <group ref={groupRef} position={[0.5, 0, 0]}> {/* Shifted slightly right as requested */}
 
-        {/* A) INNER CORE — smooth dark sphere, absorbs light */}
+        {/* 1) INNER CORE (NEW) — Solid, Dark, Metallic */}
         <mesh geometry={smoothGeo}>
-          <meshStandardMaterial
-            color="#030a0a"
-            roughness={0.7}
-            metalness={0.4}
-            envMapIntensity={0.3}
-          />
+            <meshStandardMaterial
+                color="#010101" // Almost black
+                roughness={0.7}
+                metalness={0.8}
+                envMapIntensity={1.0}
+            />
         </mesh>
 
-        {/* Inner subsurface glow — faint teal from within */}
-        <mesh ref={innerGlowRef} scale={1.88}>
+        {/* Inner subsurface glow */}
+        <mesh ref={innerGlowRef} scale={1.8}>
           <sphereGeometry args={[1, 32, 32]} />
           <meshBasicMaterial
-            color="#00ccaa"
+            color="#00D4FF"
             transparent
-            opacity={0.06}
+            opacity={0.05}
             blending={THREE.AdditiveBlending}
             depthWrite={false}
-            side={THREE.FrontSide}
+            side={THREE.DoubleSide}
           />
         </mesh>
 
-        {/* B) OUTER GEODESIC FRAME — flat-shaded dark shell */}
+        {/* 2) OUTER STRUCTURE — Thick Geodesic Frame */}
+         {/* Base dark structural frame */}
         <mesh geometry={icoGeo}>
           <meshStandardMaterial
-            color="#060f0f"
-            roughness={0.8}
-            metalness={0.35}
+            color="#02080a"
+            roughness={0.3}
+            metalness={0.9}
             flatShading
             transparent
-            opacity={0.6}
+            opacity={0.9}
+            side={THREE.DoubleSide}
           />
         </mesh>
 
-        {/* Glowing wireframe — primary (vertex colors, varied brightness) */}
+        {/* Glowing wireframe edges */}
         <lineSegments geometry={edgesGeo}>
-          <lineBasicMaterial vertexColors transparent opacity={0.85} />
+          <lineBasicMaterial vertexColors transparent opacity={0.6} blending={THREE.AdditiveBlending} depthWrite={false} />
         </lineSegments>
 
-        {/* Wireframe bloom layer — additive for glow bleed */}
-        <lineSegments geometry={edgesGeo}>
-          <lineBasicMaterial
-            color="#00ffcc"
-            transparent
-            opacity={0.12}
-            blending={THREE.AdditiveBlending}
-            depthWrite={false}
-            toneMapped={false}
-          />
+         {/* Additional Halo / Glow around edges for bloom */}
+        <lineSegments geometry={edgesGeo} scale={1.01}>
+             <lineBasicMaterial color="#00FFFF" transparent opacity={0.1} blending={THREE.AdditiveBlending} depthWrite={false} />
         </lineSegments>
 
-        {/* C) ENERGY PANELS — warm glowing triangle faces */}
+
+        {/* 3) ENERGY PANELS — Intense Glow */}
         {panelGeos.map((panel, i) => (
           <mesh key={i} geometry={panel.geo}>
             <meshStandardMaterial
-              color="#ffcc66"
-              emissive="#ff9933"
-              emissiveIntensity={4.0 - i * 0.8}
+              color="#FF8C00" // Dark Orange base
+              emissive="#FF4500" // Red-Orange emission
+              emissiveIntensity={8.0 + Math.random() * 4.0} // High intensity for bloom
               side={THREE.DoubleSide}
-              toneMapped={false}
+              toneMapped={false} 
             />
           </mesh>
         ))}
 
-        {/* Warm point light near primary energy panel */}
+        {/* Dynamic Light Source at Primary Panel */}
         <pointLight
           ref={panelLightRef}
           position={[
-            panelGeos[0].center.x * 1.3,
-            panelGeos[0].center.y * 1.3,
-            panelGeos[0].center.z * 1.3,
+            panelGeos[0].center.x * 1.2,
+            panelGeos[0].center.y * 1.2,
+            panelGeos[0].center.z * 1.2,
           ]}
-          color="#ffaa44"
-          intensity={4.0}
-          distance={5}
+          color="#FF6600"
+          distance={8}
           decay={2}
         />
 
-        {/* Energy beams */}
+        {/* Energy Beams */}
         <group>
           {beamObjects.map((line, i) => (
             <primitive key={i} object={line} />
           ))}
         </group>
+        
+        {/* NEW: Scanning Ring */}
+        <group ref={orbitRingRef}>
+            <Torus args={[3.2, 0.02, 16, 100]} >
+                <meshBasicMaterial color="#00FFFF" transparent opacity={0.3} blending={THREE.AdditiveBlending} side={THREE.DoubleSide} />
+            </Torus>
+        </group>
 
-        {/* Atmospheric halo — large faint sphere behind core */}
-        <mesh scale={3.0}>
-          <sphereGeometry args={[1, 48, 48]} />
-          <meshBasicMaterial
-            color="#0a3333"
-            transparent
-            opacity={0.07}
-            blending={THREE.AdditiveBlending}
-            depthWrite={false}
-            side={THREE.BackSide}
-          />
-        </mesh>
-
-        {/* Outer halo — very large, barely visible */}
-        <mesh scale={4.5}>
-          <sphereGeometry args={[1, 32, 32]} />
-          <meshBasicMaterial
-            color="#062222"
-            transparent
-            opacity={0.035}
-            blending={THREE.AdditiveBlending}
-            depthWrite={false}
-            side={THREE.BackSide}
-          />
-        </mesh>
-
-        {/* Rim highlight ring — subtle teal ring at equator */}
-        <mesh rotation={[Math.PI / 2, 0, 0]} scale={2.15}>
-          <torusGeometry args={[1, 0.003, 8, 64]} />
-          <meshBasicMaterial
-            color="#00ddbb"
-            transparent
-            opacity={0.2}
-            blending={THREE.AdditiveBlending}
-            depthWrite={false}
-            toneMapped={false}
-          />
-        </mesh>
       </group>
     </Float>
   );
 }
 
 /* ═══════════════════════════════════════════════
-   PHYSICALLY CORRECT LIGHTING
+   PHYSICALLY CORRECT LIGHTING & ATMOSPHERE
    ═══════════════════════════════════════════════ */
 
+function SceneEnvironment() {
+    return (
+        <>
+            {/* ATMOSPHERE & DEPTH */}
+            {/* 1. Exponential Fog */}
+            <fog attach="fog" args={["#020b0e", 5, 25]} /> 
+            
+            {/* 2. Large Volumetric Back-Glow */}
+            <mesh position={[0,0,-8]} scale={12}>
+                <sphereGeometry args={[1, 64, 64]} />
+                <meshBasicMaterial color="#001a1f" transparent opacity={0.4} blending={THREE.AdditiveBlending} side={THREE.BackSide} depthWrite={false} />
+            </mesh>
+        </>
+    )
+}
+
 function SceneLights() {
-  const keyRef = useRef<THREE.PointLight>(null!);
-  const rimRef = useRef<THREE.PointLight>(null!);
-
-  useFrame((state) => {
-    const t = state.clock.getElapsedTime();
-    if (rimRef.current) {
-      rimRef.current.intensity = 1.8 + Math.sin(t * 0.6) * 0.4;
-    }
-    if (keyRef.current) {
-      keyRef.current.intensity = 3.5 + Math.sin(t * 0.4) * 0.3;
-    }
-  });
-
   return (
     <>
-      {/* Soft ambient fill */}
-      <ambientLight intensity={0.06} color="#0a1a1a" />
+      <ambientLight intensity={0.2} color="#00111a" />
 
-      {/* Strong key light — front-right, creates visible shading gradient */}
-      <pointLight
-        ref={keyRef}
-        position={[5, 3, 5]}
-        color="#88ddcc"
-        intensity={3.5}
-        distance={25}
+      {/* KEY LIGHT (High intensity, Cool White/Blue) - Upper Right */}
+      <spotLight
+        position={[10, 8, 8]}
+        angle={0.5}
+        penumbra={0.5}
+        intensity={800} // High intensity for physical correctness
+        color="#cceeff"
+        castShadow
+        distance={30}
         decay={2}
       />
 
-      {/* Cool teal rim light — back-left */}
-      <pointLight
-        ref={rimRef}
-        position={[-5, 2, -4]}
-        color="#00eebb"
-        intensity={1.8}
-        distance={20}
+       {/* RIM LIGHT (Strong Teal) - Opposite Side */}
+      <spotLight
+        position={[-10, 2, -5]}
+        angle={0.5}
+        penumbra={1}
+        intensity={600}
+        color="#00ffff"
+        distance={30}
         decay={2}
       />
 
-      {/* Top fill — subtle cool wash */}
-      <pointLight
-        position={[0, 6, 0]}
-        color="#224444"
-        intensity={0.8}
-        distance={18}
-        decay={2}
-      />
+      {/* FILL LIGHT (Soft Purple/Blue) - Left */}
+      <pointLight position={[-8, -5, 5]} intensity={100} color="#220044" distance={20} decay={2} />
+      
+      {/* BOUNCE LIGHT (Warm from panels) */}
+      <pointLight position={[2, -2, 2]} intensity={50} color="#ffaa00" distance={10} decay={2} />
 
-      {/* Bottom fill — very subtle, prevents pure black underside */}
-      <pointLight
-        position={[0, -5, 3]}
-        color="#0a2222"
-        intensity={0.4}
-        distance={15}
-        decay={2}
-      />
-
-      {/* Back accent — creates depth separation */}
-      <pointLight
-        position={[2, -1, -6]}
-        color="#005544"
-        intensity={1.0}
-        distance={15}
-        decay={2}
-      />
     </>
   );
 }
 
 /* ═══════════════════════════════════════════════
-   CAMERA DRIFT — gentle parallax
-   ═══════════════════════════════════════════════ */
-
-function CameraDrift() {
-  const { camera } = useThree();
-
-  useFrame((state) => {
-    const t = state.clock.getElapsedTime();
-    camera.position.x = 0.3 + Math.sin(t * 0.12) * 0.25;
-    camera.position.y = 0.05 + Math.sin(t * 0.08) * 0.18;
-    camera.position.z = 6.0 + Math.sin(t * 0.1) * 0.15;
-    camera.lookAt(1.2, 0, 0);
-  });
-
-  return null;
-}
-
-/* ═══════════════════════════════════════════════
-   PARTICLE FIELD — depth and atmosphere
+   PARTICLE FIELD
    ═══════════════════════════════════════════════ */
 
 function ParticleField() {
@@ -371,12 +312,13 @@ function ParticleField() {
 
   const positions = useMemo(() => {
     const rand = seededRandom(999);
-    const count = 500;
+    const count = 400; // Sparse
     const arr = new Float32Array(count * 3);
     for (let i = 0; i < count; i++) {
-      arr[i * 3] = (rand() - 0.5) * 25;
-      arr[i * 3 + 1] = (rand() - 0.5) * 16;
-      arr[i * 3 + 2] = (rand() - 0.5) * 20;
+      // Distribution: wide area
+      arr[i * 3] = (rand() - 0.5) * 30;
+      arr[i * 3 + 1] = (rand() - 0.5) * 20;
+      arr[i * 3 + 2] = (rand() - 0.5) * 15;
     }
     return arr;
   }, []);
@@ -384,8 +326,8 @@ function ParticleField() {
   useFrame((state) => {
     const t = state.clock.getElapsedTime();
     if (pointsRef.current) {
-      pointsRef.current.rotation.y = t * 0.003;
-      pointsRef.current.rotation.x = t * 0.001;
+      pointsRef.current.rotation.y = t * 0.02; // Slow rotation
+      pointsRef.current.position.y = Math.sin(t * 0.1) * 0.5;
     }
   });
 
@@ -395,10 +337,10 @@ function ParticleField() {
         <float32BufferAttribute attach="attributes-position" args={[positions, 3]} />
       </bufferGeometry>
       <pointsMaterial
-        color="#55ddbb"
-        size={0.018}
+        color="#00FFFF"
+        size={0.03}
         transparent
-        opacity={0.5}
+        opacity={0.4}
         blending={THREE.AdditiveBlending}
         depthWrite={false}
         sizeAttenuation
@@ -408,21 +350,20 @@ function ParticleField() {
 }
 
 /* ═══════════════════════════════════════════════
-   POST PROCESSING — cinematic bloom + vignette
+   POST PROCESSING
    ═══════════════════════════════════════════════ */
 
 function PostProcessing() {
   return (
-    <EffectComposer>
+    <EffectComposer disableNormalPass>
       <Bloom
-        intensity={1.8}
-        luminanceThreshold={0.15}
-        luminanceSmoothing={0.95}
+        luminanceThreshold={1.2} // Only very bright things glow
         mipmapBlur
-        radius={0.85}
+        intensity={1.5}
+        radius={0.6}
       />
-      <Noise opacity={0.025} />
-      <Vignette eskil={false} offset={0.15} darkness={0.85} />
+      <Vignette eskil={false} offset={0.1} darkness={0.9} />
+      <Noise opacity={0.05} /> {/* Film grain */}
     </EffectComposer>
   );
 }
@@ -584,7 +525,7 @@ export default function AIHeroScene() {
         width: "100%",
         height: "100vh",
         overflow: "hidden",
-        background: "#030909",
+        background: "#01080a", // Darker background
       }}
     >
       <Canvas
@@ -595,30 +536,29 @@ export default function AIHeroScene() {
           width: "100%",
           height: "100%",
         }}
-        camera={{ position: [0, 0, 6], fov: 50, near: 0.1, far: 100 }}
+        camera={{ position: [0, 0, 7], fov: 45, near: 0.1, far: 100 }}
         dpr={[1, 1.5]}
         gl={{
           antialias: true,
           toneMapping: THREE.ACESFilmicToneMapping,
-          toneMappingExposure: 1.4,
+          outputColorSpace: THREE.SRGBColorSpace,
         }}
+        shadows
       >
-        {/* Teal-tinted fog for depth */}
-        <fog attach="fog" args={["#040e0e", 6, 22]} />
-
-        <CameraDrift />
+        <SceneEnvironment />
         <SceneLights />
+        
         <AICoreSphere />
         <ParticleField />
 
         <Stars
-          radius={18}
-          depth={35}
-          count={1000}
-          factor={2.5}
-          saturation={0.1}
+          radius={50}
+          depth={50}
+          count={1500}
+          factor={4}
+          saturation={0}
           fade
-          speed={0.4}
+          speed={0.5}
         />
 
         <PostProcessing />
