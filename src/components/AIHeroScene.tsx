@@ -1,17 +1,19 @@
 "use client";
 
-import React, { useRef, useMemo } from "react";
-import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { Float, Stars, Torus } from "@react-three/drei";
+
+import React, { useRef, useMemo, useLayoutEffect } from "react";
+import { Canvas, useFrame } from "@react-three/fiber";
+import { Float, Stars, PerspectiveCamera, Environment } from "@react-three/drei";
 import {
   EffectComposer,
   Bloom,
   Vignette,
   Noise,
+  ChromaticAberration
 } from "@react-three/postprocessing";
 import * as THREE from "three";
 
-/* ── Deterministic PRNG (avoids SSR hydration mismatch) ── */
+/* ── Deterministic PRNG ── */
 function seededRandom(seed: number) {
   let s = seed;
   return () => {
@@ -21,301 +23,288 @@ function seededRandom(seed: number) {
 }
 
 /* ═══════════════════════════════════════════════
-   AI CORE SPHERE — layered geometry with
-   inner core, glowing wireframe, energy panels,
-   and energy beams
+   MICRO-DETAIL GREEBLES (Clean & Organized)
+   ═══════════════════════════════════════════════ */
+function MicroGreebles() {
+  // Reduced count, more organized placement to look like capacitors/resistors
+  const count = 200;
+  const meshRef = useRef<THREE.InstancedMesh>(null!);
+  const dummy = useMemo(() => new THREE.Object3D(), []);
+
+  useLayoutEffect(() => {
+    if (!meshRef.current) return;
+    const rand = seededRandom(1337);
+
+    let idx = 0;
+    for (let i = 0; i < count; i++) {
+      // Uniform small components (capacitors)
+      const w = 0.04;
+      const h = 0.08;
+      const d = 0.02;
+
+      // Distribution: Structured rows/clusters
+      let x, y;
+      if (i < 100) {
+        // Top/Bottom rows
+        x = (rand() - 0.5) * 2.8;
+        y = (rand() > 0.5 ? 1 : -1) * (1.0 + rand() * 0.4);
+      } else {
+        // Side columns
+        x = (rand() > 0.5 ? 1 : -1) * (1.0 + rand() * 0.4);
+        y = (rand() - 0.5) * 2.8;
+      }
+
+      dummy.position.set(x, y, 0.08 + d / 2);
+      dummy.scale.set(w, h, d);
+      dummy.rotation.z = rand() > 0.5 ? 0 : Math.PI / 2; // Align 90 deg
+      dummy.updateMatrix();
+      meshRef.current.setMatrixAt(idx++, dummy.matrix);
+    }
+    meshRef.current.count = idx;
+    meshRef.current.instanceMatrix.needsUpdate = true;
+  }, [dummy]);
+
+  return (
+    <instancedMesh ref={meshRef} args={[undefined, undefined, count]}>
+      <boxGeometry args={[1, 1, 1]} />
+      <meshStandardMaterial
+        color="#444444" // Significantly brighter grey for visibility
+        roughness={0.4}
+        metalness={0.9} // More metallic to catch env light
+      />
+    </instancedMesh>
+  );
+}
+
+
+/* ═══════════════════════════════════════════════
+   NEURAL CHIP CORE — Ultra High Fidelity
    ═══════════════════════════════════════════════ */
 
-function AICoreSphere() {
+function NeuralChip() {
   const groupRef = useRef<THREE.Group>(null!);
-  const panelLightRef = useRef<THREE.PointLight>(null!);
-  const innerGlowRef = useRef<THREE.Mesh>(null!);
-  const orbitRingRef = useRef<THREE.Group>(null!);
+  const coreLightRef = useRef<THREE.PointLight>(null!);
 
-  /* ── Geometry ── */
-  const icoGeo = useMemo(() => new THREE.IcosahedronGeometry(2.0, 1), []);
-  const smoothGeo = useMemo(() => new THREE.IcosahedronGeometry(1.85, 4), []); // Slightly smaller solid core
-  const edgesGeo = useMemo(() => new THREE.EdgesGeometry(icoGeo, 1.1), [icoGeo]); // Thicker edges if possible (simulated via line width or tubes, here standard edges)
+  // 1. Chip Base (Main Substrate) - Physical Material
+  const chipBaseGeo = useMemo(() => new THREE.BoxGeometry(3.2, 3.2, 0.15), []);
 
-  /* ── Edge colors: varied brightness for realism ── */
-  useMemo(() => {
-    const rand = seededRandom(42);
-    const count = edgesGeo.attributes.position.count;
-    const colors = new Float32Array(count * 3);
-    for (let i = 0; i < count; i++) {
-        const b = rand();
-        // Cyan/Teal Palette
-        if (b > 0.8) {
-            // Bright Cyan Highlihgts
-            colors[i * 3] = 0.4;
-            colors[i * 3 + 1] = 1.0;
-            colors[i * 3 + 2] = 1.0; 
-        } else if (b > 0.4) {
-             // Mid Teal
-            colors[i * 3] = 0.0;
-            colors[i * 3 + 1] = 0.8;
-            colors[i * 3 + 2] = 0.8;
-        } else {
-             // Dark Teal
-            colors[i * 3] = 0.0;
-            colors[i * 3 + 1] = 0.3;
-            colors[i * 3 + 2] = 0.3;
-        }
-    }
-    edgesGeo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
-  }, [edgesGeo]);
+  // 2. Pins (High density, thinner, metallic, perfectly aligned)
+  const pinsGeo = useMemo(() => {
+    const geometry = new THREE.BufferGeometry();
+    const vertices: number[] = [];
+    const count = 100; // Even higher density for premium look
+    const size = 3.22;
+    const pinW = 0.012;
+    const pinL = 0.12;
 
-  /* ── Energy panels: 3 random triangle faces glow warm ── */
-  const panelGeos = useMemo(() => {
-    const pos = icoGeo.attributes.position;
-    const totalFaces = pos.count / 3;
-    const rand = seededRandom(123); // New seed
-    const faceIndices = new Set<number>();
-    while (faceIndices.size < 4) { // Increased to 4 panels
-      faceIndices.add(Math.floor(rand() * totalFaces));
-    }
-    return Array.from(faceIndices).map((fi) => {
-      const base = fi * 3;
-      const vA = new THREE.Vector3().fromBufferAttribute(pos, base);
-      const vB = new THREE.Vector3().fromBufferAttribute(pos, base + 1);
-      const vC = new THREE.Vector3().fromBufferAttribute(pos, base + 2);
-      const geo = new THREE.BufferGeometry();
-      geo.setAttribute(
-        "position",
-        new THREE.BufferAttribute(
-          new Float32Array([vA.x, vA.y, vA.z, vB.x, vB.y, vB.z, vC.x, vC.y, vC.z]),
-          3
-        )
+    const addPin = (x: number, y: number, w: number, h: number) => {
+      const z = 0.0;
+      vertices.push(
+        x - w, y - h, z, x + w, y - h, z, x + w, y + h, z,
+        x - w, y - h, z, x + w, y + h, z, x - w, y + h, z
       );
-      geo.computeVertexNormals();
-      const center = new THREE.Vector3().addVectors(vA, vB).add(vC).divideScalar(3);
-      return { geo, center };
-    });
-  }, [icoGeo]);
+    };
 
-  /* ── Energy beams: thin lines radiating outward ── */
-  const beamObjects = useMemo(() => {
-    const rand = seededRandom(200);
-    const pos = icoGeo.attributes.position;
-    const objects: THREE.Line[] = [];
-    for (let i = 0; i < 15; i++) { // Increased count
-      const idx = Math.floor(rand() * pos.count);
-      const v = new THREE.Vector3().fromBufferAttribute(pos, idx);
-      const dir = v.clone().normalize();
-      const start = v.clone().multiplyScalar(0.95);
-      const end = v.clone().add(dir.multiplyScalar(4.0 + rand() * 5.0)); // Longer beams
-      const geo = new THREE.BufferGeometry().setFromPoints([start, end]);
-      const mat = new THREE.LineBasicMaterial({
-        color: new THREE.Color().setHSL(0.5 + rand() * 0.1, 0.9, 0.6), // Cyan/Blue
-        transparent: true,
-        opacity: 0.1 + rand() * 0.4,
-        blending: THREE.AdditiveBlending,
-        depthWrite: false,
-        toneMapped: false,
-      });
-      objects.push(new THREE.Line(geo, mat));
+    for (let i = 0; i < count; i++) {
+      const offset = (i / (count - 1) - 0.5) * size * 0.99;
+      // Top/Bottom
+      addPin(offset, size / 2 + pinL / 2, pinW, pinL);
+      addPin(offset, -size / 2 - pinL / 2, pinW, pinL);
+      // Left/Right
+      addPin(size / 2 + pinL / 2, offset, pinL, pinW);
+      addPin(-size / 2 - pinL / 2, offset, pinL, pinW);
     }
-    return objects;
-  }, [icoGeo]);
+
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+    geometry.computeVertexNormals();
+    return geometry;
+  }, []);
+
+  // 4, Circuit Lines (Multi-Layered - Cleaner, Straighter)
+  const denseCircuitGeo = useMemo(() => createCircuitGeo(80, 0.3, 42), []); // Reduced chaos
+  const activeCircuitGeo = useMemo(() => createCircuitGeo(20, 0.6, 99), []);
 
   /* ── Animation loop ── */
   useFrame((state) => {
     const t = state.clock.getElapsedTime();
-
     if (groupRef.current) {
-      groupRef.current.rotation.y = t * 0.04; // Slower rotation
-      groupRef.current.rotation.x = Math.sin(t * 0.02) * 0.05;
+      // Much smoother, slower float for "clean" feel
+      groupRef.current.rotation.x = Math.sin(t * 0.05) * 0.08;
+      groupRef.current.rotation.y = Math.sin(t * 0.03) * 0.12;
     }
-
-    if (orbitRingRef.current) {
-        orbitRingRef.current.rotation.z = t * 0.1;
-        orbitRingRef.current.rotation.x = Math.PI / 2 + Math.sin(t * 0.05) * 0.1;
+    if (coreLightRef.current) {
+      // Smooth breathing, NO FLICKER
+      coreLightRef.current.intensity = 8.0 + Math.sin(t * 1.5) * 2.0;
     }
-
-    if (panelLightRef.current) {
-       // Flicker effect
-      panelLightRef.current.intensity = 15.0 + Math.sin(t * 10.0) * 2.0 + Math.random() * 2.0;
-    }
-
-    if (innerGlowRef.current) {
-      const mat = innerGlowRef.current.material as THREE.MeshBasicMaterial;
-      mat.opacity = 0.05 + Math.sin(t * 0.5) * 0.03;
-    }
-
-    beamObjects.forEach((line, i) => {
-      const mat = line.material as THREE.LineBasicMaterial;
-      mat.opacity = 0.1 + Math.sin(t * 2.0 + i * 10.0) * 0.1 + Math.random() * 0.05;
-    });
   });
 
   return (
-    <Float speed={1.5} rotationIntensity={0.1} floatIntensity={0.4}>
-      <group ref={groupRef} position={[0.5, 0, 0]}> {/* Shifted slightly right as requested */}
+    <Float speed={0.8} rotationIntensity={0.1} floatIntensity={0.2}>
+      <group ref={groupRef} rotation={[0.4, -0.2, 0]}>
 
-        {/* 1) INNER CORE (NEW) — Solid, Dark, Metallic */}
-        <mesh geometry={smoothGeo}>
-            <meshStandardMaterial
-                color="#010101" // Almost black
-                roughness={0.7}
-                metalness={0.8}
-                envMapIntensity={1.0}
-            />
-        </mesh>
-
-        {/* Inner subsurface glow */}
-        <mesh ref={innerGlowRef} scale={1.8}>
-          <sphereGeometry args={[1, 32, 32]} />
-          <meshBasicMaterial
-            color="#00D4FF"
-            transparent
-            opacity={0.05}
-            blending={THREE.AdditiveBlending}
-            depthWrite={false}
-            side={THREE.DoubleSide}
+        {/* A. Substrate Layer (Clean, Matte/Satin Finish) */}
+        <mesh geometry={chipBaseGeo}>
+          <meshPhysicalMaterial
+            color="#151515" // Much lighter than #080808
+            roughness={0.35}
+            metalness={0.5}
+            clearcoat={0.3} // Reduced clearcoat to reduce messy reflections
+            clearcoatRoughness={0.2}
           />
         </mesh>
 
-        {/* 2) OUTER STRUCTURE — Thick Geodesic Frame */}
-         {/* Base dark structural frame */}
-        <mesh geometry={icoGeo}>
+        {/* B. Pins Layer (Clean Gold) */}
+        <mesh geometry={pinsGeo}>
           <meshStandardMaterial
-            color="#02080a"
-            roughness={0.3}
-            metalness={0.9}
-            flatShading
-            transparent
-            opacity={0.9}
-            side={THREE.DoubleSide}
+            color="#ffcc44" // Brighter gold
+            metalness={1.0}
+            roughness={0.15}
+            emissive="#aa6600"
+            emissiveIntensity={0.2} // Slight self-illumination
           />
         </mesh>
 
-        {/* Glowing wireframe edges */}
-        <lineSegments geometry={edgesGeo}>
-          <lineBasicMaterial vertexColors transparent opacity={0.6} blending={THREE.AdditiveBlending} depthWrite={false} />
-        </lineSegments>
+        {/* C. Micro-Detail Greebles (Organized) */}
+        <MicroGreebles />
 
-         {/* Additional Halo / Glow around edges for bloom */}
-        <lineSegments geometry={edgesGeo} scale={1.01}>
-             <lineBasicMaterial color="#00FFFF" transparent opacity={0.1} blending={THREE.AdditiveBlending} depthWrite={false} />
-        </lineSegments>
+        {/* D. COMPLEX CORE ASSEMBLY (Pristine Glass) */}
+        <group position={[0, 0, 0.1]}>
+          {/* 1. Base Plate */}
+          <mesh>
+            <boxGeometry args={[1.4, 1.4, 0.02]} />
+            <meshStandardMaterial color="#101010" roughness={0.3} metalness={0.8} />
+          </mesh>
 
-
-        {/* 3) ENERGY PANELS — Intense Glow */}
-        {panelGeos.map((panel, i) => (
-          <mesh key={i} geometry={panel.geo}>
-            <meshStandardMaterial
-              color="#FF8C00" // Dark Orange base
-              emissive="#FF4500" // Red-Orange emission
-              emissiveIntensity={8.0 + Math.random() * 4.0} // High intensity for bloom
-              side={THREE.DoubleSide}
-              toneMapped={false} 
+          {/* 2. Inner Heat Spreader (Matte Metal) */}
+          <mesh position={[0, 0, 0.02]}>
+            <boxGeometry args={[0.9, 0.9, 0.04]} />
+            <meshPhysicalMaterial
+              color="#333333"
+              metalness={1.0}
+              roughness={0.3}
             />
           </mesh>
-        ))}
 
-        {/* Dynamic Light Source at Primary Panel */}
-        <pointLight
-          ref={panelLightRef}
-          position={[
-            panelGeos[0].center.x * 1.2,
-            panelGeos[0].center.y * 1.2,
-            panelGeos[0].center.z * 1.2,
-          ]}
-          color="#FF6600"
-          distance={8}
-          decay={2}
-        />
+          {/* 3. The "Die" (Clean Light Source) */}
+          <mesh position={[0, 0, 0.05]}>
+            <boxGeometry args={[0.4, 0.4, 0.01]} />
+            <meshBasicMaterial color="#ff0066" />
+          </mesh>
 
-        {/* Energy Beams */}
-        <group>
-          {beamObjects.map((line, i) => (
-            <primitive key={i} object={line} />
-          ))}
+          {/* 4. Glass Shield (Perfectly Clear) */}
+          <mesh position={[0, 0, 0.08]}>
+            <boxGeometry args={[1.1, 1.1, 0.04]} />
+            <meshPhysicalMaterial
+              transmission={1.0}
+              roughness={0.0} // Perfect glass
+              thickness={0.05}
+              ior={1.5}
+              color="#ffffff"
+              attenuationColor="#ffffff"
+              attenuationDistance={1}
+            />
+          </mesh>
         </group>
-        
-        {/* NEW: Scanning Ring */}
-        <group ref={orbitRingRef}>
-            <Torus args={[3.2, 0.02, 16, 100]} >
-                <meshBasicMaterial color="#00FFFF" transparent opacity={0.3} blending={THREE.AdditiveBlending} side={THREE.DoubleSide} />
-            </Torus>
-        </group>
+
+        {/* E. Core Light */}
+        <pointLight ref={coreLightRef} position={[0, 0, 0.5]} color="#ff0044" distance={5} decay={2} />
+
+        {/* F. Circuits */}
+        {/* Passive Dark Traces - Thinner, subtler */}
+        <lineSegments geometry={denseCircuitGeo} position={[0, 0, 0.081]}>
+          <lineBasicMaterial color="#aa3355" opacity={0.3} transparent depthWrite={false} blending={THREE.AdditiveBlending} />
+        </lineSegments>
+
+        {/* Active Glowing Traces - Clean distinct paths */}
+        <lineSegments geometry={activeCircuitGeo} position={[0, 0, 0.082]}>
+          <lineBasicMaterial color="#ff0066" opacity={0.9} transparent depthWrite={false} blending={THREE.AdditiveBlending} toneMapped={false} />
+        </lineSegments>
 
       </group>
     </Float>
   );
 }
 
-/* ═══════════════════════════════════════════════
-   PHYSICALLY CORRECT LIGHTING & ATMOSPHERE
-   ═══════════════════════════════════════════════ */
+// Helper for circuit generation
+function createCircuitGeo(count: number, variance: number, seed: number) {
+  const points: THREE.Vector3[] = [];
+  const rand = seededRandom(seed);
 
-function SceneEnvironment() {
-    return (
-        <>
-            {/* ATMOSPHERE & DEPTH */}
-            {/* 1. Exponential Fog */}
-            <fog attach="fog" args={["#020b0e", 5, 25]} /> 
-            
-            {/* 2. Large Volumetric Back-Glow */}
-            <mesh position={[0,0,-8]} scale={12}>
-                <sphereGeometry args={[1, 64, 64]} />
-                <meshBasicMaterial color="#001a1f" transparent opacity={0.4} blending={THREE.AdditiveBlending} side={THREE.BackSide} depthWrite={false} />
-            </mesh>
-        </>
-    )
+  // More structured, less "spaghetti"
+  for (let i = 0; i < count; i++) {
+    const startEdge = Math.floor(rand() * 4);
+    // Constrain start points to grid-ish locations
+    const offset = Math.round((rand() - 0.5) * 2.8 * variance * 10) / 10;
+
+    let startX = 0, startY = 0;
+    if (startEdge === 0) { startX = offset; startY = 1.3; }
+    else if (startEdge === 1) { startX = 1.3; startY = offset; }
+    else if (startEdge === 2) { startX = offset; startY = -1.3; }
+    else { startX = -1.3; startY = offset; }
+
+    // End points near center but not IN center
+    const endX = Math.round((rand() - 0.5) * 0.8 * 10) / 10;
+    const endY = Math.round((rand() - 0.5) * 0.8 * 10) / 10;
+
+    const p1 = new THREE.Vector3(startX, startY, 0);
+    const p2 = new THREE.Vector3(startX, endY, 0); // Orthogonal step 1
+    const p3 = new THREE.Vector3(endX, endY, 0);   // Orthogonal step 2
+
+    points.push(p1, p2, p2, p3);
+  }
+  return new THREE.BufferGeometry().setFromPoints(points);
 }
 
-function SceneLights() {
+
+/* ═══════════════════════════════════════════════
+   ECOSYSTEM & PARTICLES
+   ═══════════════════════════════════════════════ */
+
+function NetworkLines() {
+  const linesGeo = useMemo(() => {
+    const points: THREE.Vector3[] = [];
+    const rand = seededRandom(555);
+    // Reduced count for cleanliness
+    for (let i = 0; i < 40; i++) {
+      const angle = rand() * Math.PI * 2;
+      const radius = 2.0;
+      const x = Math.cos(angle) * radius;
+      const y = Math.sin(angle) * radius;
+      const z = (rand() - 0.5) * 0.2; // Flatter
+
+      const length = 4.0 + rand() * 6.0;
+      const p1 = new THREE.Vector3(x, y, z);
+      const p2 = p1.clone().add(p1.clone().normalize().multiplyScalar(length));
+
+      points.push(p1, p2);
+    }
+    return new THREE.BufferGeometry().setFromPoints(points);
+  }, []);
+
   return (
-    <>
-      <ambientLight intensity={0.2} color="#00111a" />
-
-      {/* KEY LIGHT (High intensity, Cool White/Blue) - Upper Right */}
-      <spotLight
-        position={[10, 8, 8]}
-        angle={0.5}
-        penumbra={0.5}
-        intensity={800} // High intensity for physical correctness
-        color="#cceeff"
-        castShadow
-        distance={30}
-        decay={2}
-      />
-
-       {/* RIM LIGHT (Strong Teal) - Opposite Side */}
-      <spotLight
-        position={[-10, 2, -5]}
-        angle={0.5}
-        penumbra={1}
-        intensity={600}
-        color="#00ffff"
-        distance={30}
-        decay={2}
-      />
-
-      {/* FILL LIGHT (Soft Purple/Blue) - Left */}
-      <pointLight position={[-8, -5, 5]} intensity={100} color="#220044" distance={20} decay={2} />
-      
-      {/* BOUNCE LIGHT (Warm from panels) */}
-      <pointLight position={[2, -2, 2]} intensity={50} color="#ffaa00" distance={10} decay={2} />
-
-    </>
-  );
+    <group position={[0, 0, -1]}>
+      <lineSegments geometry={linesGeo}>
+        <lineBasicMaterial
+          color="#aa0044"
+          transparent
+          opacity={0.1} // Very subtle
+          blending={THREE.AdditiveBlending}
+          depthWrite={false}
+        />
+      </lineSegments>
+    </group>
+  )
 }
-
-/* ═══════════════════════════════════════════════
-   PARTICLE FIELD
-   ═══════════════════════════════════════════════ */
 
 function ParticleField() {
   const pointsRef = useRef<THREE.Points>(null!);
+  const count = 400; // Reduced density
 
   const positions = useMemo(() => {
     const rand = seededRandom(999);
-    const count = 400; // Sparse
     const arr = new Float32Array(count * 3);
     for (let i = 0; i < count; i++) {
-      // Distribution: wide area
+      // Volumetric distribution
       arr[i * 3] = (rand() - 0.5) * 30;
       arr[i * 3 + 1] = (rand() - 0.5) * 20;
       arr[i * 3 + 2] = (rand() - 0.5) * 15;
@@ -327,7 +316,6 @@ function ParticleField() {
     const t = state.clock.getElapsedTime();
     if (pointsRef.current) {
       pointsRef.current.rotation.y = t * 0.02; // Slow rotation
-      pointsRef.current.position.y = Math.sin(t * 0.1) * 0.5;
     }
   });
 
@@ -337,10 +325,10 @@ function ParticleField() {
         <float32BufferAttribute attach="attributes-position" args={[positions, 3]} />
       </bufferGeometry>
       <pointsMaterial
-        color="#00FFFF"
-        size={0.03}
+        color="#ff0088" // Pinker
+        size={0.02}
         transparent
-        opacity={0.4}
+        opacity={0.3}
         blending={THREE.AdditiveBlending}
         depthWrite={false}
         sizeAttenuation
@@ -350,20 +338,74 @@ function ParticleField() {
 }
 
 /* ═══════════════════════════════════════════════
+   CINEMATIC LIGHTING (Clean & Studio-like)
+   ═══════════════════════════════════════════════ */
+
+function SceneLights() {
+  const movLight = useRef<THREE.SpotLight>(null!);
+
+  useFrame(({ clock }) => {
+    const t = clock.getElapsedTime();
+    if (movLight.current) {
+      // Slow, deliberate movement of rim light
+      movLight.current.position.x = Math.sin(t * 0.2) * 12;
+      movLight.current.position.z = Math.cos(t * 0.2) * 12;
+    }
+  })
+
+  return (
+    <>
+      <ambientLight intensity={0.5} color="#110511" /> {/* Boosted Ambient */}
+
+      {/* Main Top Light - Soft box */}
+      <spotLight
+        position={[2, 10, 5]}
+        angle={0.5}
+        penumbra={0.5} // Very soft edges
+        intensity={300}
+        color="#ff00aa"
+        castShadow
+        distance={40}
+        decay={2}
+      />
+
+      {/* Moving Rim Light - Sharp but slow */}
+      <spotLight
+        ref={movLight}
+        position={[-10, 0, 5]}
+        angle={0.3}
+        penumbra={0.5}
+        intensity={300}
+        color="#00aaff" // Cyan
+        distance={40}
+        decay={2}
+      />
+
+      {/* Strong Front Fill to reveal details */}
+      <pointLight position={[0, 0, 8]} intensity={50} color="#ffffff" distance={20} decay={2} />
+
+      {/* Underglow */}
+      <pointLight position={[0, -5, 2]} intensity={50} color="#330066" distance={20} decay={2} />
+    </>
+  );
+}
+
+/* ═══════════════════════════════════════════════
    POST PROCESSING
    ═══════════════════════════════════════════════ */
 
 function PostProcessing() {
   return (
-    <EffectComposer disableNormalPass>
+    <EffectComposer>
       <Bloom
-        luminanceThreshold={1.2} // Only very bright things glow
+        luminanceThreshold={0.8}
         mipmapBlur
-        intensity={1.5}
-        radius={0.6}
+        intensity={1.0}
+        radius={0.3}
       />
-      <Vignette eskil={false} offset={0.1} darkness={0.9} />
-      <Noise opacity={0.05} /> {/* Film grain */}
+      <ChromaticAberration offset={new THREE.Vector2(0.001, 0.001)} />
+      <Vignette eskil={false} offset={0.1} darkness={0.6} /> {/* Lighter vignette */}
+      <Noise opacity={0.03} />
     </EffectComposer>
   );
 }
@@ -404,7 +446,7 @@ function TextOverlay() {
         >
           <span
             style={{
-              color: "#44ddbb",
+              color: "#ff0088",
               fontSize: "clamp(0.75rem, 1.2vw, 1rem)",
               fontFamily: "'Inter', 'Helvetica Neue', Arial, sans-serif",
               letterSpacing: "0.3em",
@@ -412,7 +454,7 @@ function TextOverlay() {
               fontWeight: 300,
             }}
           >
-            Welcome
+            S-Series 2
           </span>
         </div>
 
@@ -421,7 +463,7 @@ function TextOverlay() {
           style={{
             width: "2.5rem",
             height: "1px",
-            background: "linear-gradient(90deg, #44ddbb, transparent)",
+            background: "linear-gradient(90deg, #ff0088, transparent)",
             marginBottom: "2rem",
           }}
         />
@@ -440,12 +482,13 @@ function TextOverlay() {
             style={{
               display: "block",
               fontSize: "clamp(2.5rem, 6vw, 5.5rem)",
-              color: "#44ddbb",
+              color: "#ff0088",
               letterSpacing: "0.35em",
               textTransform: "uppercase" as const,
+              textShadow: "0 0 30px rgba(255,0,102,0.4)"
             }}
           >
-            SOLARIN
+            NEURAL
           </span>
           <span
             style={{
@@ -457,7 +500,7 @@ function TextOverlay() {
               marginTop: "0.15em",
             }}
           >
-            HAS
+            CORE
           </span>
           <span
             style={{
@@ -469,52 +512,16 @@ function TextOverlay() {
               marginTop: "0.15em",
             }}
           >
-            ARRIVED
+            ACTIVE
           </span>
         </h1>
-
-        {/* Decorative accent */}
-        <div
-          style={{
-            display: "flex",
-            gap: "0.5rem",
-            marginTop: "2.5rem",
-            alignItems: "center",
-          }}
-        >
-          <div
-            style={{
-              width: "6px",
-              height: "6px",
-              borderRadius: "50%",
-              backgroundColor: "#44ddbb",
-              opacity: 0.6,
-            }}
-          />
-          <div
-            style={{
-              width: "60px",
-              height: "1px",
-              backgroundColor: "#44ddbb",
-              opacity: 0.3,
-            }}
-          />
-          <div
-            style={{
-              width: "40px",
-              height: "1px",
-              backgroundColor: "#44ddbb",
-              opacity: 0.15,
-            }}
-          />
-        </div>
       </div>
     </div>
   );
 }
 
 /* ═══════════════════════════════════════════════
-   MAIN EXPORT — AIHeroScene
+   MAIN EXPORT
    ═══════════════════════════════════════════════ */
 
 export default function AIHeroScene() {
@@ -525,7 +532,7 @@ export default function AIHeroScene() {
         width: "100%",
         height: "100vh",
         overflow: "hidden",
-        background: "#01080a", // Darker background
+        background: "#080008", // Dark purple/black background
       }}
     >
       <Canvas
@@ -536,7 +543,6 @@ export default function AIHeroScene() {
           width: "100%",
           height: "100%",
         }}
-        camera={{ position: [0, 0, 7], fov: 45, near: 0.1, far: 100 }}
         dpr={[1, 1.5]}
         gl={{
           antialias: true,
@@ -545,20 +551,28 @@ export default function AIHeroScene() {
         }}
         shadows
       >
-        <SceneEnvironment />
+        <PerspectiveCamera makeDefault position={[0, 0, 8]} fov={45} />
+
+        {/* Atmosphere */}
+        <fog attach="fog" args={["#080008", 8, 35]} />
+        <color attach="background" args={["#050005"]} />
+
+        <Environment preset="city" blur={1} /> {/* Added Environment for metal reflections */}
+
         <SceneLights />
-        
-        <AICoreSphere />
+
+        <NeuralChip />
+        <NetworkLines />
         <ParticleField />
 
         <Stars
-          radius={50}
-          depth={50}
-          count={1500}
+          radius={60}
+          depth={40}
+          count={2000}
           factor={4}
-          saturation={0}
+          saturation={0.5}
           fade
-          speed={0.5}
+          speed={0.2}
         />
 
         <PostProcessing />
